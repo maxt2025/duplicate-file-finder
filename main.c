@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#define TABLE_SIZE 2000
 typedef struct{
     char *path;
     size_t size;
@@ -32,6 +33,9 @@ bool addFile(FileList *list, char *path, size_t size){
     list->allFiles[list->count].size=size;
     size_t pathLen=strlen(path);
     list->allFiles[list->count].path=malloc(pathLen+1);
+    if(list->allFiles[list->count].path==NULL){
+        return false;
+    }
     strcpy(list->allFiles[list->count].path, path);
     (list->count)++;
     return true;
@@ -56,6 +60,7 @@ bool scanDirectory(const char *path, FileList *list){
 
         if(S_ISDIR(info.st_mode)){
             if(!scanDirectory(fullPath, list)){
+                closedir(dir);
                 return false;
             }
         } else if(S_ISREG(info.st_mode)){
@@ -99,7 +104,23 @@ uint64_t hashFile(const char *path){
     return hash;
     
 }
-void addFilesToHashTable(Node **hashTable, int tableSize, FileList list){
+Node *createNode(const char *path, size_t size, uint64_t hash){
+    Node *node=malloc(sizeof(Node));
+    if(node==NULL){
+        return NULL;
+    }
+    node->path=malloc(strlen(path)+1);
+    if(node->path==NULL){
+        free(node);
+        return NULL;
+    }
+    strcpy(node->path, path);
+    node->size=size;
+    node->hash=hash;
+    node->next=NULL;
+    return node;
+}
+bool addFilesToHashTable(Node **hashTable, FileList list){
     int i=0;
     int k=1;
     while(k<list.count){
@@ -108,30 +129,24 @@ void addFilesToHashTable(Node **hashTable, int tableSize, FileList list){
             k++;
         } else{
             uint64_t hash=hashFile(list.allFiles[k].path);
-            int hashIndex=hash%tableSize;
-            Node *newNode=malloc(sizeof(Node));
-            newNode->hash=hash;
-            newNode->size=list.allFiles[k].size;
-            size_t lenOfPath=strlen(list.allFiles[k].path);
-            newNode->path=malloc(lenOfPath+1);
-            strcpy(newNode->path, list.allFiles[k].path);
+            int hashIndex=hash%TABLE_SIZE;
+            Node *newNode=createNode(list.allFiles[k].path, list.allFiles[k].size, hash);
+            if(newNode==NULL) return false;
             newNode->next=hashTable[hashIndex];
             hashTable[hashIndex]=newNode;
+
             if(i+1==k){
                 hash=hashFile(list.allFiles[k-1].path);
-                hashIndex=hash%tableSize;
-                Node *newNode2=malloc(sizeof(Node));
-                newNode2->hash=hash;
-                newNode2->size=list.allFiles[k-1].size;
-                lenOfPath=strlen(list.allFiles[k-1].path);
-                newNode2->path=malloc(lenOfPath+1);
-                strcpy(newNode2->path, list.allFiles[k-1].path);
+                hashIndex=hash%TABLE_SIZE;
+                Node *newNode2=createNode(list.allFiles[k-1].path, list.allFiles[k-1].size, hash);
+                if(newNode2==NULL) return false;
                 newNode2->next=hashTable[hashIndex];
                 hashTable[hashIndex]=newNode2;
             }
             k++;
         }
     }
+    return true;
 }
 bool areSame(Node *curFile, Node *fileFromGroup){
     if(curFile->hash!=fileFromGroup->hash || curFile->size!=fileFromGroup->size) return false;
@@ -183,17 +198,25 @@ Node **findSameFiles(Node *first, int *count){
     Node *cur=first;
     int tmpGroupsSize=10;
     Node **tmpGroups=malloc(tmpGroupsSize*sizeof(Node *));
+    if(tmpGroups==NULL){
+        *count=0;
+        return NULL;
+    }
     int tmpGroupsCount=0;
     while(cur!=NULL){
         bool found=false;
         for(int i=0; i<tmpGroupsCount; i++){
             if(areSame(cur, tmpGroups[i])){
-                Node *newNode=malloc(sizeof(Node));
-                newNode->size=cur->size;
-                newNode->hash=cur->hash;
-                size_t lenOfPath=strlen(cur->path);
-                newNode->path=malloc(lenOfPath+1);
-                strcpy(newNode->path, cur->path);
+                Node *newNode=createNode(cur->path, cur->size, cur->hash);
+                if(newNode==NULL){
+                    for(int k=0; k<tmpGroupsCount; k++){
+                        freeLinkedList(tmpGroups[k]);
+                    }
+                    free(tmpGroups);
+                    *count=0;
+                    return NULL;
+                }
+                
                 newNode->next=tmpGroups[i];
                 tmpGroups[i]=newNode;
                 found=true;
@@ -215,13 +238,16 @@ Node **findSameFiles(Node *first, int *count){
                 }
                 tmpGroups=reSize;
             }
-            Node *newNode=malloc(sizeof(Node));
-            newNode->size=cur->size;
-            newNode->hash=cur->hash;
-            size_t lenOfPath=strlen(cur->path);
-            newNode->path=malloc(lenOfPath+1);
-            strcpy(newNode->path, cur->path);
-            newNode->next=NULL;
+
+            Node *newNode=createNode(cur->path, cur->size, cur->hash);
+            if(newNode==NULL){
+                for(int k=0; k<tmpGroupsCount; k++){
+                    freeLinkedList(tmpGroups[k]);
+                }
+                free(tmpGroups);
+                *count=0;
+                return NULL;
+            }
             tmpGroups[tmpGroupsCount]=newNode;
             tmpGroupsCount++;
         }
@@ -303,15 +329,19 @@ void freeAll(FileList *list, Node **hashTable, Node **allGroups, int countOfGrou
     }
     free(list->allFiles);
 
-    for(int i=0; i<2000; i++){
-        freeLinkedList(hashTable[i]);
+    if(hashTable!=NULL){
+        for(int i=0; i<TABLE_SIZE; i++){
+            freeLinkedList(hashTable[i]);
+        }
+        free(hashTable);
     }
-    free(hashTable);
-
-    for(int i=0; i<countOfGroups; i++){
-        freeLinkedList(allGroups[i]);
+    
+    if(allGroups!=NULL){
+        for(int i=0; i<countOfGroups; i++){
+            freeLinkedList(allGroups[i]);
+        }
+        free(allGroups);
     }
-    free(allGroups);
 }
 
 int main(int argc, char *argv[]){
@@ -322,6 +352,10 @@ int main(int argc, char *argv[]){
     FileList list;
     list.capacity=50;
     list.allFiles=malloc(list.capacity*sizeof(FileInfo));
+    if(list.allFiles==NULL){
+        printf("Memory allocation failed.\n");
+        return EXIT_FAILURE;
+    }
     list.count=0;
     char *home=getenv("HOME");
 
@@ -367,15 +401,34 @@ int main(int argc, char *argv[]){
 
     qsort(list.allFiles, list.count, sizeof(FileInfo), compare);
     
-    Node **hashTable=calloc(2000, sizeof(Node *));
-    addFilesToHashTable(hashTable, 2000, list);
+    Node **hashTable=calloc(TABLE_SIZE, sizeof(Node *));
+    if(hashTable==NULL){
+        printf("Memory allocation failed.\n");
+        freeAll(&list, NULL, NULL, 0);
+        return EXIT_FAILURE;
+    }
+    if(!addFilesToHashTable(hashTable, list)){
+        printf("Memory allocation failed.\n");
+        freeAll(&list, hashTable, NULL, 0);
+        return EXIT_FAILURE;
+    }
     int sizeOfGroupsArr=200;
     Node **allGroups=malloc(sizeOfGroupsArr*sizeof(Node *));
+    if(allGroups==NULL){
+        printf("Memory allocation failed.\n");
+        freeAll(&list, hashTable, allGroups, 0);
+        return EXIT_FAILURE;
+    }
     int countOfGroups=0;
     int tmpGroupsCount=0;
-    for(int i=0; i<2000; i++){
+    for(int i=0; i<TABLE_SIZE; i++){
         if(hashTable[i]!=NULL && hashTable[i][0].next!=NULL){
             Node **tmpGroups=findSameFiles(hashTable[i],  &tmpGroupsCount);
+            if(tmpGroups==NULL){
+                printf("Memory allocation failed.\n");
+                freeAll(&list, hashTable, allGroups, countOfGroups);
+                return EXIT_FAILURE;
+            }
             for(int i=0; i<tmpGroupsCount; i++){
                 if(tmpGroups[i][0].next!=NULL){
                     if(sizeOfGroupsArr==countOfGroups){
