@@ -1,4 +1,5 @@
-**# Duplicate File Finder**
+# Duplicate File Finder
+
 A command-line utility written in **C** for finding duplicate files.
 
 The program recursively scans selected user directories, detects files with identical content, and calculates how much disk space could potentially be recovered by removing duplicates.
