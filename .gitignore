@@ -1,0 +1,5 @@
+dupfinder
+*.o
+.vscode/
+.idea/
+.DS_Store
