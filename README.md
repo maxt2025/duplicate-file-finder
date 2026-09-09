@@ -38,18 +38,23 @@ gcc -Wall -Wextra -pedantic main.c -o dupfinder
 
 Currently, the program accepts the following directories:
 ~/Documents
+
 ~/Downloads
+
 ~/Pictures
 
-Example:
+### Example:
+
 ./dupfinder "$HOME/Documents" "$HOME/Downloads"
 
-Example output:
+### Example output:
 
 Group #1:
+
 Size: 6.25 MB
 
 /home/user/Documents/video.mp4
+
 /home/user/Downloads/video-copy.mp4
 
 Potential saving: 6.25 MB
